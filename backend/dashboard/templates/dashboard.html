@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SafeBreath — Air Quality Monitor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg:        #0b0f14;
+      --surface:   #131920;
+      --surface2:  #1b2430;
+      --border:    #1e2e3d;
+      --good:      #1affa0;
+      --moderate:  #ffcb47;
+      --danger:    #ff4f6d;
+      --text:      #e8edf3;
+      --muted:     #56687a;
+      --accent:    #00aaff;
+      --font-head: 'Syne', sans-serif;
+      --font-mono: 'DM Mono', monospace;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-head);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Animated grid background ── */
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background-image:
+        linear-gradient(rgba(0,170,255,.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,170,255,.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Header ── */
+    header {
+      position: relative; z-index: 10;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 18px 32px;
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(8px);
+      background: rgba(11,15,20,.85);
+    }
+
+    .logo {
+      display: flex; align-items: center; gap: 10px;
+    }
+
+    .logo-icon {
+      width: 34px; height: 34px;
+      background: linear-gradient(135deg, var(--good), var(--accent));
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px;
+    }
+
+    .logo-text {
+      font-size: 1.15rem; font-weight: 800;
+      letter-spacing: -0.5px;
+    }
+
+    .logo-text span { color: var(--good); }
+
+    .header-right {
+      display: flex; align-items: center; gap: 16px;
+    }
+
+    .live-badge {
+      display: flex; align-items: center; gap: 6px;
+      font-family: var(--font-mono); font-size: .72rem;
+      color: var(--good);
+      background: rgba(26,255,160,.08);
+      border: 1px solid rgba(26,255,160,.2);
+      border-radius: 20px; padding: 4px 12px;
+    }
+
+    .live-dot {
+      width: 6px; height: 6px;
+      background: var(--good); border-radius: 50%;
+      animation: pulse 1.8s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: .4; transform: scale(.7); }
+    }
+
+    #last-updated {
+      font-family: var(--font-mono); font-size: .72rem;
+      color: var(--muted);
+    }
+
+    /* ── Main layout ── */
+    main {
+      position: relative; z-index: 1;
+      max-width: 1400px; margin: 0 auto;
+      padding: 28px 32px 48px;
+    }
+
+    /* ── Section title ── */
+    .section-title {
+      font-size: .7rem; font-weight: 600;
+      letter-spacing: 2px; text-transform: uppercase;
+      color: var(--muted); margin-bottom: 14px;
+    }
+
+    /* ── Status Banner ── */
+    #status-banner {
+      display: flex; align-items: center; gap: 16px;
+      padding: 18px 24px;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      margin-bottom: 28px;
+      transition: background .4s, border-color .4s;
+    }
+
+    #status-banner.good   { border-color: rgba(26,255,160,.35); background: rgba(26,255,160,.06); }
+    #status-banner.moderate { border-color: rgba(255,203,71,.35); background: rgba(255,203,71,.06); }
+    #status-banner.danger { border-color: rgba(255,79,109,.35); background: rgba(255,79,109,.06); }
+
+    #status-icon {
+      font-size: 2.2rem; line-height: 1;
+      transition: transform .4s;
+    }
+
+    #status-banner:hover #status-icon { transform: scale(1.15) rotate(5deg); }
+
+    .status-body { flex: 1; }
+    #status-label {
+      font-size: 1.4rem; font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+    #status-msg {
+      font-family: var(--font-mono); font-size: .8rem;
+      color: var(--muted); margin-top: 2px;
+    }
+
+    #status-mq {
+      font-family: var(--font-mono);
+      font-size: 2rem; font-weight: 500;
+      text-align: right;
+    }
+
+    .status-mq-unit {
+      font-size: .8rem; color: var(--muted);
+      display: block; text-align: right;
+      margin-top: -4px;
+    }
+
+    /* ── Top Stats Grid ── */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+
+    @media (max-width: 900px) {
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px 20px;
+      position: relative;
+      overflow: hidden;
+      transition: transform .2s, border-color .2s;
+    }
+
+    .stat-card:hover {
+      transform: translateY(-2px);
+      border-color: rgba(0,170,255,.3);
+    }
+
+    .stat-card::after {
+      content: '';
+      position: absolute; top: 0; left: 0; right: 0;
+      height: 2px;
+      background: var(--accent);
+      opacity: .5;
+    }
+
+    .stat-card.good::after  { background: var(--good); }
+    .stat-card.warn::after  { background: var(--moderate); }
+    .stat-card.bad::after   { background: var(--danger); }
+    .stat-card.info::after  { background: var(--accent); }
+
+    .stat-label {
+      font-size: .68rem; font-weight: 600;
+      letter-spacing: 1.5px; text-transform: uppercase;
+      color: var(--muted); margin-bottom: 8px;
+    }
+
+    .stat-value {
+      font-family: var(--font-mono);
+      font-size: 2rem; font-weight: 500;
+      line-height: 1;
+      color: var(--text);
+    }
+
+    .stat-sub {
+      font-family: var(--font-mono); font-size: .72rem;
+      color: var(--muted); margin-top: 4px;
+    }
+
+    /* ── Two-col layout ── */
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-bottom: 28px;
+    }
+
+    @media (max-width: 900px) {
+      .two-col { grid-template-columns: 1fr; }
+    }
+
+    /* ── Chart card ── */
+    .chart-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 22px;
+    }
+
+    .chart-card.wide {
+      grid-column: 1 / -1;
+    }
+
+    .chart-header {
+      display: flex; justify-content: space-between; align-items: flex-start;
+      margin-bottom: 18px;
+    }
+
+    .chart-title {
+      font-size: 1rem; font-weight: 700;
+      letter-spacing: -0.3px;
+    }
+
+    .chart-sub {
+      font-family: var(--font-mono); font-size: .7rem;
+      color: var(--muted); margin-top: 2px;
+    }
+
+    /* ── Distribution bars ── */
+    #dist-container { margin-top: 8px; }
+
+    .dist-row {
+      display: grid;
+      grid-template-columns: 70px 1fr 50px;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .dist-name {
+      font-family: var(--font-mono); font-size: .75rem;
+      color: var(--muted);
+    }
+
+    .dist-bar-track {
+      height: 8px; border-radius: 4px;
+      background: var(--surface2);
+      overflow: hidden;
+    }
+
+    .dist-bar-fill {
+      height: 100%; border-radius: 4px;
+      transition: width 1s cubic-bezier(.16,1,.3,1);
+    }
+
+    .dist-fill-good     { background: var(--good); }
+    .dist-fill-moderate { background: var(--moderate); }
+    .dist-fill-unhealthy { background: var(--danger); }
+
+    .dist-count {
+      font-family: var(--font-mono); font-size: .75rem;
+      text-align: right; color: var(--text);
+    }
+
+    /* ── Reading Gauge ── */
+    #gauge-wrap {
+      display: flex; flex-direction: column; align-items: center;
+      padding: 12px 0;
+    }
+
+    #gauge-canvas { max-width: 220px; }
+
+    #gauge-label {
+      font-family: var(--font-mono); font-size: .8rem;
+      color: var(--muted); margin-top: 8px;
+      text-align: center;
+    }
+
+    /* ── Table ── */
+    .table-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+      margin-bottom: 28px;
+    }
+
+    .table-header {
+      padding: 18px 22px 14px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+
+    .table-title { font-size: 1rem; font-weight: 700; }
+
+    .table-count {
+      font-family: var(--font-mono); font-size: .72rem;
+      color: var(--muted);
+    }
+
+    .data-table {
+      width: 100%; border-collapse: collapse;
+    }
+
+    .data-table thead th {
+      padding: 10px 22px;
+      font-size: .65rem; font-weight: 600;
+      letter-spacing: 1.5px; text-transform: uppercase;
+      color: var(--muted); text-align: left;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface2);
+    }
+
+    .data-table tbody tr {
+      border-bottom: 1px solid rgba(30,46,61,.5);
+      transition: background .15s;
+    }
+
+    .data-table tbody tr:hover {
+      background: var(--surface2);
+    }
+
+    .data-table tbody tr:last-child { border-bottom: none; }
+
+    .data-table td {
+      padding: 12px 22px;
+      font-family: var(--font-mono); font-size: .8rem;
+    }
+
+    .td-device {
+      color: var(--accent);
+      font-weight: 500;
+    }
+
+    .td-mq { color: var(--text); }
+
+    .label-badge {
+      display: inline-block;
+      padding: 3px 10px; border-radius: 6px;
+      font-size: .7rem; font-weight: 600;
+    }
+
+    .badge-Good      { background: rgba(26,255,160,.15); color: var(--good); }
+    .badge-Moderate  { background: rgba(255,203,71,.15); color: var(--moderate); }
+    .badge-Unhealthy { background: rgba(255,79,109,.15); color: var(--danger); }
+    .badge-unknown   { background: rgba(86,104,122,.15); color: var(--muted); }
+
+    .td-time { color: var(--muted); }
+
+    /* ── Empty / Error state ── */
+    .empty-state {
+      text-align: center; padding: 40px;
+      color: var(--muted); font-family: var(--font-mono);
+      font-size: .85rem;
+    }
+
+    /* ── Pulse row animation for newest entry ── */
+    @keyframes rowIn {
+      from { opacity: 0; transform: translateY(-8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .row-new { animation: rowIn .35s ease forwards; }
+
+    /* ── Footer ── */
+    footer {
+      text-align: center;
+      padding: 16px;
+      font-family: var(--font-mono); font-size: .7rem;
+      color: var(--muted);
+      border-top: 1px solid var(--border);
+    }
+  </style>
+</head>
+<body>
+
+<!-- ───── HEADER ───── -->
+<header>
+  <div class="logo">
+    <div class="logo-icon">🌬️</div>
+    <span class="logo-text">Safe<span>Breath</span></span>
+  </div>
+  <div class="header-right">
+    <div class="live-badge">
+      <div class="live-dot"></div>
+      LIVE
+    </div>
+    <span id="last-updated">—</span>
+  </div>
+</header>
+
+<!-- ───── MAIN ───── -->
+<main>
+
+  <!-- Status Banner -->
+  <div id="status-banner" class="good">
+    <div id="status-icon">😊</div>
+    <div class="status-body">
+      <div id="status-label">Good</div>
+      <div id="status-msg">Air quality is good. Safe to breathe.</div>
+    </div>
+    <div>
+      <div id="status-mq">—</div>
+      <span class="status-mq-unit">MQ reading</span>
+    </div>
+  </div>
+
+  <!-- Stats Row -->
+  <p class="section-title">Overview</p>
+  <div class="stats-grid">
+    <div class="stat-card good">
+      <div class="stat-label">Good Readings</div>
+      <div class="stat-value" id="count-good">—</div>
+      <div class="stat-sub">MQ ≤ 500</div>
+    </div>
+    <div class="stat-card warn">
+      <div class="stat-label">Moderate</div>
+      <div class="stat-value" id="count-moderate">—</div>
+      <div class="stat-sub">MQ 501–750</div>
+    </div>
+    <div class="stat-card bad">
+      <div class="stat-label">Unhealthy</div>
+      <div class="stat-value" id="count-unhealthy">—</div>
+      <div class="stat-sub">MQ &gt; 750</div>
+    </div>
+    <div class="stat-card info">
+      <div class="stat-label">Avg MQ (50)</div>
+      <div class="stat-value" id="avg-mq">—</div>
+      <div class="stat-sub">Last 50 readings</div>
+    </div>
+  </div>
+
+  <!-- Charts Row -->
+  <p class="section-title">Analytics</p>
+  <div class="two-col">
+
+    <!-- MQ History chart -->
+    <div class="chart-card">
+      <div class="chart-header">
+        <div>
+          <div class="chart-title">MQ Sensor History</div>
+          <div class="chart-sub">Last 50 readings over time</div>
+        </div>
+      </div>
+      <canvas id="mq-chart" height="180"></canvas>
+    </div>
+
+    <!-- Distribution + gauge -->
+    <div class="chart-card">
+      <div class="chart-header">
+        <div>
+          <div class="chart-title">Classification Breakdown</div>
+          <div class="chart-sub">Count by air quality label</div>
+        </div>
+      </div>
+
+      <div id="dist-container">
+        <div class="dist-row">
+          <span class="dist-name">Good</span>
+          <div class="dist-bar-track">
+            <div class="dist-bar-fill dist-fill-good" id="bar-good" style="width:0%"></div>
+          </div>
+          <span class="dist-count" id="dc-good">0</span>
+        </div>
+        <div class="dist-row">
+          <span class="dist-name">Moderate</span>
+          <div class="dist-bar-track">
+            <div class="dist-bar-fill dist-fill-moderate" id="bar-moderate" style="width:0%"></div>
+          </div>
+          <span class="dist-count" id="dc-moderate">0</span>
+        </div>
+        <div class="dist-row">
+          <span class="dist-name">Unhealthy</span>
+          <div class="dist-bar-track">
+            <div class="dist-bar-fill dist-fill-unhealthy" id="bar-unhealthy" style="width:0%"></div>
+          </div>
+          <span class="dist-count" id="dc-unhealthy">0</span>
+        </div>
+      </div>
+
+      <div id="gauge-wrap" style="margin-top:24px;">
+        <canvas id="gauge-canvas" height="130"></canvas>
+        <div id="gauge-label">Current reading</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Data Table -->
+  <p class="section-title">Recent Readings</p>
+  <div class="table-card">
+    <div class="table-header">
+      <span class="table-title">Sensor Log</span>
+      <span class="table-count" id="row-count">0 records</span>
+    </div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Device ID</th>
+          <th>MQ Value</th>
+          <th>AI Label</th>
+          <th>Pollution Index</th>
+          <th>Timestamp</th>
+        </tr>
+      </thead>
+      <tbody id="data-tbody"></tbody>
+    </table>
+  </div>
+
+</main>
+
+<footer>SafeBreath AI-IoT Air Quality Monitor · ESP32 + MQ135 · Flask + MongoDB</footer>
+
+<script>
+// ─────────────────────────────────────────────
+//  DATA injected by Flask (server-side)
+// ─────────────────────────────────────────────
+const SERVER_DATA = {{ data | tojson }};
+
+// ─────────────────────────────────────────────
+//  HELPERS
+// ─────────────────────────────────────────────
+function labelClass(label) {
+  if (!label) return 'unknown';
+  const l = label.toLowerCase();
+  if (l === 'good') return 'Good';
+  if (l === 'moderate') return 'Moderate';
+  if (l === 'unhealthy') return 'Unhealthy';
+  return 'unknown';
+}
+
+function labelIcon(label) {
+  const lc = labelClass(label);
+  if (lc === 'Good') return '😊';
+  if (lc === 'Moderate') return '😐';
+  if (lc === 'Unhealthy') return '😷';
+  return '❓';
+}
+
+function moodColor(label) {
+  const lc = labelClass(label);
+  if (lc === 'Good') return getComputedStyle(document.documentElement).getPropertyValue('--good').trim();
+  if (lc === 'Moderate') return getComputedStyle(document.documentElement).getPropertyValue('--moderate').trim();
+  if (lc === 'Unhealthy') return getComputedStyle(document.documentElement).getPropertyValue('--danger').trim();
+  return '#56687a';
+}
+
+function mqColor(mq) {
+  if (mq <= 500) return '#1affa0';
+  if (mq <= 750) return '#ffcb47';
+  return '#ff4f6d';
+}
+
+function now() {
+  return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+// ─────────────────────────────────────────────
+//  POPULATE DATA
+// ─────────────────────────────────────────────
+function populate(data) {
+  if (!data || data.length === 0) {
+    document.getElementById('data-tbody').innerHTML =
+      '<tr><td colspan="5"><div class="empty-state">No sensor data yet. Waiting for ESP32...</div></td></tr>';
+    return;
+  }
+
+  // ── Stats
+  let good = 0, moderate = 0, unhealthy = 0, mqSum = 0;
+  data.forEach(d => {
+    const lc = labelClass(d.label);
+    if (lc === 'Good') good++;
+    else if (lc === 'Moderate') moderate++;
+    else if (lc === 'Unhealthy') unhealthy++;
+    mqSum += Number(d.mq) || 0;
+  });
+  const total = data.length;
+
+  document.getElementById('count-good').textContent = good;
+  document.getElementById('count-moderate').textContent = moderate;
+  document.getElementById('count-unhealthy').textContent = unhealthy;
+  document.getElementById('avg-mq').textContent = total ? Math.round(mqSum / total) : '—';
+  document.getElementById('row-count').textContent = `${total} record${total !== 1 ? 's' : ''}`;
+
+  // ── Distribution bars
+  function setPct(id, barId, count) {
+    const pct = total ? Math.round((count / total) * 100) : 0;
+    document.getElementById(barId).style.width = pct + '%';
+    document.getElementById(id).textContent = count;
+  }
+  setPct('dc-good', 'bar-good', good);
+  setPct('dc-moderate', 'bar-moderate', moderate);
+  setPct('dc-unhealthy', 'bar-unhealthy', unhealthy);
+
+  // ── Status banner (latest)
+  const latest = data[0];
+  const latestMQ = Number(latest.mq) || 0;
+  const latestLabel = labelClass(latest.label);
+  const banner = document.getElementById('status-banner');
+  banner.className = latestLabel === 'Unhealthy' ? 'danger'
+    : latestLabel === 'Moderate' ? 'moderate' : 'good';
+
+  document.getElementById('status-icon').textContent = labelIcon(latest.label);
+  document.getElementById('status-label').textContent = latestLabel;
+  const msgs = {
+    Good: 'Air quality is good. Safe for all groups.',
+    Moderate: 'Moderate air quality. Sensitive groups take caution.',
+    Unhealthy: '⚠ Hazardous air quality! Take protective measures.',
+    unknown: 'Air quality status unknown.'
+  };
+  document.getElementById('status-msg').textContent = msgs[latestLabel] || msgs.unknown;
+  document.getElementById('status-mq').textContent = latestMQ;
+
+  // ── Table rows
+  const tbody = document.getElementById('data-tbody');
+  tbody.innerHTML = '';
+  data.forEach((d, i) => {
+    const lc = labelClass(d.label);
+    const mq = Number(d.mq) || 0;
+    const pi = d.pollution_index != null ? Number(d.pollution_index).toFixed(3) : '—';
+    const tr = document.createElement('tr');
+    if (i === 0) tr.classList.add('row-new');
+    tr.innerHTML = `
+      <td class="td-device">${d.device_id || '—'}</td>
+      <td class="td-mq" style="color:${mqColor(mq)}">${mq}</td>
+      <td><span class="label-badge badge-${lc}">${lc}</span></td>
+      <td class="td-mq">${pi}</td>
+      <td class="td-time">${d.timestamp || '—'}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  // ── Chart
+  updateChart(data);
+  updateGauge(latestMQ);
+  document.getElementById('last-updated').textContent = 'Updated ' + now();
+}
+
+// ─────────────────────────────────────────────
+//  MQ LINE CHART
+// ─────────────────────────────────────────────
+let mqChart = null;
+
+function buildChart(data) {
+  const reversed = [...data].reverse();
+  const labels = reversed.map(d => d.timestamp ? d.timestamp.split(' ')[1] || d.timestamp : '');
+  const values = reversed.map(d => Number(d.mq) || 0);
+  const colors = values.map(mqColor);
+
+  const ctx = document.getElementById('mq-chart').getContext('2d');
+
+  const gradient = ctx.createLinearGradient(0, 0, 0, 200);
+  gradient.addColorStop(0, 'rgba(0,170,255,0.3)');
+  gradient.addColorStop(1, 'rgba(0,170,255,0)');
+
+  mqChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'MQ Value',
+        data: values,
+        borderColor: '#00aaff',
+        backgroundColor: gradient,
+        borderWidth: 2,
+        pointBackgroundColor: colors,
+        pointBorderColor: colors,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        fill: true,
+        tension: 0.4,
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#131920',
+          borderColor: '#1e2e3d',
+          borderWidth: 1,
+          titleColor: '#e8edf3',
+          bodyColor: '#56687a',
+          titleFont: { family: 'DM Mono' },
+          bodyFont: { family: 'DM Mono' },
+          callbacks: {
+            label: ctx => `  MQ: ${ctx.raw}`,
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: '#56687a', font: { family: 'DM Mono', size: 10 }, maxTicksLimit: 8 },
+          grid: { color: 'rgba(30,46,61,.5)' },
+        },
+        y: {
+          ticks: { color: '#56687a', font: { family: 'DM Mono', size: 10 } },
+          grid: { color: 'rgba(30,46,61,.5)' },
+        }
+      },
+      animation: { duration: 600, easing: 'easeOutQuart' }
+    }
+  });
+}
+
+function updateChart(data) {
+  if (!mqChart) { buildChart(data); return; }
+  const reversed = [...data].reverse();
+  mqChart.data.labels = reversed.map(d => d.timestamp ? d.timestamp.split(' ')[1] || d.timestamp : '');
+  mqChart.data.datasets[0].data = reversed.map(d => Number(d.mq) || 0);
+  mqChart.data.datasets[0].pointBackgroundColor = mqChart.data.datasets[0].data.map(mqColor);
+  mqChart.data.datasets[0].pointBorderColor = mqChart.data.datasets[0].pointBackgroundColor;
+  mqChart.update();
+}
+
+// ─────────────────────────────────────────────
+//  GAUGE (Arc)
+// ─────────────────────────────────────────────
+let gaugeChart = null;
+
+function buildGauge(mq) {
+  const ctx = document.getElementById('gauge-canvas').getContext('2d');
+  const pct = Math.min(mq / 1500, 1);
+
+  gaugeChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      datasets: [{
+        data: [pct, 1 - pct],
+        backgroundColor: [mqColor(mq), '#1b2430'],
+        borderWidth: 0,
+        circumference: 180,
+        rotation: -90,
+      }]
+    },
+    options: {
+      cutout: '72%',
+      plugins: {
+        legend: { display: false },
+        tooltip: { enabled: false },
+      },
+      animation: { duration: 700, easing: 'easeOutQuart' }
+    },
+    plugins: [{
+      id: 'gauge-text',
+      afterDraw(chart) {
+        const { ctx, chartArea: { left, right, top, bottom } } = chart;
+        const cx = (left + right) / 2;
+        const cy = bottom - 6;
+        ctx.save();
+        ctx.fillStyle = '#e8edf3';
+        ctx.font = "bold 22px 'DM Mono'";
+        ctx.textAlign = 'center';
+        ctx.fillText(mq, cx, cy);
+        ctx.fillStyle = '#56687a';
+        ctx.font = "11px 'DM Mono'";
+        ctx.fillText('MQ raw', cx, cy + 14);
+        ctx.restore();
+      }
+    }]
+  });
+}
+
+function updateGauge(mq) {
+  if (!gaugeChart) { buildGauge(mq); return; }
+  const pct = Math.min(mq / 1500, 1);
+  gaugeChart.data.datasets[0].data = [pct, 1 - pct];
+  gaugeChart.data.datasets[0].backgroundColor[0] = mqColor(mq);
+
+  // update center text via re-render
+  gaugeChart.options.plugins['gauge-text'] = undefined;
+  gaugeChart.destroy();
+  buildGauge(mq);
+}
+
+// ─────────────────────────────────────────────
+//  LIVE POLL from /api/sensor (GET latest 50)
+//  Falls back to server-rendered data if fetch fails
+// ─────────────────────────────────────────────
+async function fetchLatest() {
+  try {
+    const res = await fetch('/api/latest', { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) throw new Error('not ok');
+    const json = await res.json();
+    if (Array.isArray(json)) return json;
+    if (json.data && Array.isArray(json.data)) return json.data;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function tick() {
+  const fresh = await fetchLatest();
+  if (fresh && fresh.length > 0) {
+    populate(fresh);
+  }
+}
+
+// ─────────────────────────────────────────────
+//  INIT
+// ─────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  // Render server data immediately
+  populate(SERVER_DATA);
+
+  // Poll every 5 seconds for live updates
+  setInterval(tick, 5000);
+});
+</script>
+</body>
+</html>
